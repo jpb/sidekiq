@@ -56,6 +56,7 @@ module Sidekiq
 
         def initialize(options = {})
           @max_retries = options.fetch(:max_retries, DEFAULT_MAX_RETRY_ATTEMPTS)
+          @failure_errors = options.fetch(:failure_errors, [])
         end
 
         def call(worker, msg, queue)
@@ -65,6 +66,12 @@ module Sidekiq
           raise
         rescue Exception => e
           raise e unless msg['retry']
+
+          if error_is_failure(e)
+             failure_encountered
+             raise e
+          end
+
           max_retry_attempts = retry_attempts_from(msg['retry'], @max_retries)
 
           msg['queue'] = if msg['retry_queue']
@@ -121,6 +128,16 @@ module Sidekiq
           handle_exception(e, { :context => "Error calling retries_exhausted" })
         end
 
+        def failure_encountered(worker, msg)
+          logger.debug { "Dropping message after encountering a failure error: #{msg}" }
+          if worker.sidekiq_failure_encountered_block?
+            worker.sidekiq_failure_encountered_block.call(msg)
+          end
+
+        rescue Exception => e
+          handle_exception(e, { :context => "Error calling failure_encountered" })
+        end
+
         def retry_attempts_from(msg_retry, default)
           if msg_retry.is_a?(Fixnum)
             msg_retry
@@ -145,6 +162,10 @@ module Sidekiq
             handle_exception(e, { :context => "Failure scheduling retry using the defined `sidekiq_retry_in` in #{worker.class.name}, falling back to default" })
             nil
           end
+        end
+
+        def error_is_failure(e, failure_errors)
+          failure_errors.map{ |error| e.kind_of?(error) }.include?(true)
         end
 
       end
