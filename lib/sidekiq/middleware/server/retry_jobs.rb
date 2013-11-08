@@ -164,8 +164,8 @@ module Sidekiq
           end
         end
 
-        def error_is_failure(e, failure_errors)
-          failure_errors.map{ |error| e.kind_of?(error) }.include?(true)
+        def error_is_failure(e)
+          @failure_errors.map{ |error| e.kind_of?(error) }.include?(true)
         end
 
       end
