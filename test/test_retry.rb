@@ -18,6 +18,8 @@ class TestRetry < Sidekiq::Test
       end
     end
 
+    class FailureError < StandardError; end
+
     it 'allows disabling retry' do
       msg = { 'class' => 'Bob', 'args' => [1,2,'foo'], 'retry' => false }
       msg2 = msg.dup
@@ -60,6 +62,38 @@ class TestRetry < Sidekiq::Test
         end
       end
       @redis.verify
+    end
+
+    it 'allows providing failure errors' do
+      msg = { 'class' => 'Bob', 'args' => [1,2,'foo'], 'failure_errors' => [FailureError] }
+      msg2 = msg.dup
+      handler = Sidekiq::Middleware::Server::RetryJobs.new
+      assert_raises FailureError do
+        handler.call(worker, msg2, 'default') do
+          raise FailureError
+        end
+      end
+      assert_equal msg, msg2
+    end
+
+    it 'allows a failure_errors option in initializer' do
+      max_retries = 7
+      1.upto(max_retries) do
+        @redis.expect :zadd, 1, ['retry', String, String]
+      end
+      msg = { 'class' => 'Bob', 'args' => [1,2,'foo'], 'retry' => true }
+      handler = Sidekiq::Middleware::Server::RetryJobs.new({:failure_errors => [FailureError]})
+      1.upto(max_retries + 1) do
+        assert_raises FailureError do
+          handler.call(worker, msg, 'default') do
+            raise FailureError
+          end
+        end
+      end
+
+      assert_raises(MockExpectationError, "zadd should not be called") do
+        @redis.verify
+      end
     end
 
     it 'saves backtraces' do
@@ -299,6 +333,61 @@ class TestRetry < Sidekiq::Test
         refute_equal 4, handler.send(:delay_for, error_worker, 2)
         assert_match(/Failure scheduling retry using the defined `sidekiq_retry_in`/,
                      File.read(@tmp_log_path), 'Log entry missing for sidekiq_retry_in')
+      end
+    end
+
+    describe "failure errors" do
+      let(:handler){ Sidekiq::Middleware::Server::RetryJobs.new(failure_errors: [FailureError]) }
+      let(:msg){ {"class"=>"Bob", "args"=>[1, 2, "foo"], "queue"=>"default"} }
+      let(:worker) do
+        Class.new do
+          include Sidekiq::Worker
+
+          sidekiq_failure_encountered do |msg|
+            msg.tap {|m| m['called_by_callback'] = true }
+          end
+        end
+      end
+
+      describe "worker block" do
+        it 'calls worker sidekiq_failure_encountered_block after failure error is encountered' do
+          new_msg      = handler.send(:failure_encountered, worker, msg)
+          expected_msg = msg.merge('called_by_callback' => true)
+
+          assert_equal expected_msg, new_msg, "sidekiq_failure_encountered block not called"
+        end
+      end
+
+      describe 'failures in failure_encountered_block' do
+        let(:worker) do
+          Class.new do
+            include Sidekiq::Worker
+
+            sidekiq_failure_encountered do |msg|
+              raise "kerblamo!"
+            end
+          end
+        end
+
+        it 'handles and logs failure_encountered failures gracefully (drops them)' do
+          e = assert_raises FailureError do
+            handler.call(worker, msg, 'default') do
+              raise FailureError
+            end
+          end
+
+          assert_equal e.message, 'TestRetry::FailureError'
+        end
+      end
+
+      it 'does not handle other errors' do
+        e = assert_raises RuntimeError do
+          handler.call(worker, msg, 'default') do
+            raise "kerblammo!"
+          end
+        end
+
+        assert_equal e.message, "kerblammo!"
       end
     end
   end
