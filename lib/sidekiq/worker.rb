@@ -28,6 +28,7 @@ module Sidekiq
       base.class_attribute :sidekiq_options_hash
       base.class_attribute :sidekiq_retry_in_block
       base.class_attribute :sidekiq_retries_exhausted_block
+      base.class_attribute :sidekiq_failure_encountered_block
     end
 
     def logger
@@ -60,6 +61,7 @@ module Sidekiq
       #
       #   :queue - use a named queue for this Worker, default 'default'
       #   :retry - enable the RetryJobs middleware for this Worker, default *true*
+      #   :failure_errors - which errors to consider a valid failure and to not retry the job, default []
       #   :backtrace - whether to save any error backtrace in the retry payload to display in web UI,
       #      can be true, false or an integer number of lines to save, default *false*
       def sidekiq_options(opts={})
@@ -73,6 +75,10 @@ module Sidekiq
 
       def sidekiq_retries_exhausted(&block)
         self.sidekiq_retries_exhausted_block = block
+      end
+
+      def sidekiq_failure_encountered(&block)
+        self.sidekiq_failure_encountered_block = block
       end
 
       def get_sidekiq_options # :nodoc:

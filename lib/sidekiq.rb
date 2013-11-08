@@ -94,7 +94,7 @@ module Sidekiq
   end
 
   def self.default_worker_options
-    @default_worker_options || { 'retry' => true, 'queue' => 'default' }
+    @default_worker_options || { 'retry' => true, 'queue' => 'default', 'failure_errors' => [] }
   end
 
   def self.load_json(string)
