@@ -67,7 +67,7 @@ module Sidekiq
         rescue Exception => e
           raise e unless msg['retry']
 
-          if error_is_failure(e, msg['failure_errors'])
+          if error_is_failure(e, @failure_errors)
              failure_encountered(worker, msg)
              raise e
           end
