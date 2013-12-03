@@ -64,8 +64,29 @@ class TestRetry < Sidekiq::Test
       @redis.verify
     end
 
-    it 'allows providing failure errors' do
-      msg = { 'class' => 'Bob', 'args' => [1,2,'foo'], 'failure_errors' => [FailureError] }
+    it 'failure errors allows retries for other errors' do
+      @redis.expect :zadd, 1, ['retry', String, String]
+      msg = { 'class' => 'Bob', 'args' => [1,2,'foo'], 'retry' => true, 'queue' => 'default', 'failure_errors' => [FailureError] }
+      msg2 = msg.dup
+      handler = Sidekiq::Middleware::Server::RetryJobs.new
+      assert_raises RuntimeError do
+        handler.call(worker, msg2, 'default') do
+          raise "kerblammo!"
+        end
+      end
+      msg2.delete('failed_at')
+
+      msg['error_message'] = "kerblammo!"
+      msg['error_class'] = "RuntimeError"
+      msg['retry_count'] = 0
+
+      assert_equal msg, msg2
+      @redis.verify
+    end
+
+    it 'allows providing failure errors in worker' do
+      @redis.expect :zadd, 1, ['retry', String, String]
+      msg = { 'class' => 'Bob', 'args' => [1,2,'foo'], 'retry' => true, 'failure_errors' => [FailureError] }
       msg2 = msg.dup
       handler = Sidekiq::Middleware::Server::RetryJobs.new
       assert_raises FailureError do
@@ -73,21 +94,20 @@ class TestRetry < Sidekiq::Test
           raise FailureError
         end
       end
-      assert_equal msg, msg2
+
+      assert_raises(MockExpectationError, "zadd should not be called") do
+        @redis.verify
+      end
     end
 
     it 'allows a failure_errors option in initializer' do
       max_retries = 7
-      1.upto(max_retries) do
-        @redis.expect :zadd, 1, ['retry', String, String]
-      end
+      @redis.expect :zadd, 1, ['retry', String, String]
       msg = { 'class' => 'Bob', 'args' => [1,2,'foo'], 'retry' => true }
       handler = Sidekiq::Middleware::Server::RetryJobs.new({:failure_errors => [FailureError]})
-      1.upto(max_retries + 1) do
-        assert_raises FailureError do
-          handler.call(worker, msg, 'default') do
-            raise FailureError
-          end
+      assert_raises FailureError do
+        handler.call(worker, msg, 'default') do
+          raise FailureError
         end
       end
 
