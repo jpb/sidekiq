@@ -67,7 +67,9 @@ module Sidekiq
         rescue Exception => e
           raise e unless msg['retry']
 
-          if error_is_failure(e, failure_errors_from(msg['failure_errors'], @failure_errors))
+          failure_errors = failure_errors_from(msg['failure_errors'], @failure_errors)
+
+          if error_is_failure(e, failure_errors)
              failure_encountered(worker, msg)
              raise e
           end
@@ -172,17 +174,8 @@ module Sidekiq
           end
         end
 
-        def error_is_failure(e, msg_failure_errors)
-          failure_errors = failure_errors_from(msg_failure_errors, @failure_errors)
+        def error_is_failure(e, failure_errors)
           failure_errors.map{ |error| e.kind_of?(error) }.include?(true)
-        end
-
-        def failure_errors_from(msg_failure_errors, default)
-          if msg_failure_errors.is_a?(Array)
-            msg_failure_errors
-          else
-            default
-          end
         end
 
       end
