@@ -1,4 +1,5 @@
 require 'securerandom'
+require 'sidekiq/worker'
 require 'sidekiq/middleware/chain'
 
 module Sidekiq
@@ -187,9 +188,19 @@ module Sidekiq
         normalized_item = Sidekiq.default_worker_options.merge(item)
       end
 
+      normalized_item = marshal_item(normalized_item)
+
       normalized_item['jid'] ||= SecureRandom.hex(12)
       normalized_item['enqueued_at'] ||= Time.now.to_f
       normalized_item
+    end
+
+    def marshal_item(item)
+      Sidekiq::Worker::MSG_MARSHALLED_KEYS.each do |key|
+        item[key] = Marshal.dump(item[key]) if item.key?(key)
+      end
+
+      item
     end
 
   end

@@ -56,6 +56,7 @@ module Sidekiq
 
         def initialize(options = {})
           @max_retries = options.fetch(:max_retries, DEFAULT_MAX_RETRY_ATTEMPTS)
+          @failure_errors = options.fetch(:failure_errors, [])
         end
 
         def call(worker, msg, queue)
@@ -64,7 +65,17 @@ module Sidekiq
           # ignore, will be pushed back onto queue during hard_shutdown
           raise
         rescue Exception => e
+          msg = unmarshal_msg(msg)
+
           raise e unless msg['retry']
+
+          failure_errors = failure_errors_from(msg['failure_errors'], @failure_errors)
+
+          if error_is_failure(e, failure_errors)
+             failure_encountered(worker, msg)
+             raise e
+          end
+
           max_retry_attempts = retry_attempts_from(msg['retry'], @max_retries)
 
           msg['queue'] = if msg['retry_queue']
@@ -121,9 +132,27 @@ module Sidekiq
           handle_exception(e, { :context => "Error calling retries_exhausted" })
         end
 
+        def failure_encountered(worker, msg)
+          logger.debug { "Dropping message after encountering a failure error: #{msg}" }
+          if worker.sidekiq_failure_encountered_block?
+            worker.sidekiq_failure_encountered_block.call(msg)
+          end
+
+        rescue Exception => e
+          handle_exception(e, { :context => "Error calling failure_encountered" })
+        end
+
         def retry_attempts_from(msg_retry, default)
           if msg_retry.is_a?(Fixnum)
             msg_retry
+          else
+            default
+          end
+        end
+
+        def failure_errors_from(msg_failure_errors, default)
+          if msg_failure_errors.is_a?(Array)
+            msg_failure_errors
           else
             default
           end
@@ -145,6 +174,18 @@ module Sidekiq
             handle_exception(e, { :context => "Failure scheduling retry using the defined `sidekiq_retry_in` in #{worker.class.name}, falling back to default" })
             nil
           end
+        end
+
+        def error_is_failure(e, failure_errors)
+          failure_errors.map{ |error| e.kind_of?(error) }.include?(true)
+        end
+
+        def unmarshal_msg(msg)
+          Sidekiq::Worker::MSG_MARSHALLED_KEYS.each do |key|
+            msg[key] = Marshal.load(msg[key]) if msg.key?(key) and msg[key].is_a?(String)
+          end
+
+          msg
         end
 
       end
