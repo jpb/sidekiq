@@ -23,6 +23,8 @@ module Sidekiq
   module Worker
     attr_accessor :jid
 
+    MSG_MARSHALLED_KEYS = %w(failure_errors)
+
     def self.included(base)
       base.extend(ClassMethods)
       base.class_attribute :sidekiq_options_hash

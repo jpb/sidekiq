@@ -65,6 +65,8 @@ module Sidekiq
           # ignore, will be pushed back onto queue during hard_shutdown
           raise
         rescue Exception => e
+          msg = unmarshal_msg(msg)
+
           raise e unless msg['retry']
 
           failure_errors = failure_errors_from(msg['failure_errors'], @failure_errors)
@@ -176,6 +178,14 @@ module Sidekiq
 
         def error_is_failure(e, failure_errors)
           failure_errors.map{ |error| e.kind_of?(error) }.include?(true)
+        end
+
+        def unmarshal_msg(msg)
+          Sidekiq::Worker::MSG_MARSHALLED_KEYS.each do |key|
+            msg[key] = Marshal.load(msg[key]) if msg.key?(key) and msg[key].is_a?(String)
+          end
+
+          msg
         end
 
       end
